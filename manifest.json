@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "TabTone",
+  "version": "0.1.0",
+  "description": "Volume control and sound enhancement for browser tabs",
+  "action": {
+    "default_popup": "popup/index.html"
+  },
+  "commands": {
+    "toggle-capture": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Toggle tab audio processing"
+    },
+    "gain-up": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+PageUp"
+      },
+      "description": "Increase gain by 10%"
+    },
+    "gain-down": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+PageDown"
+      },
+      "description": "Decrease gain by 10%"
+    }
+  },
+  "permissions": ["tabCapture", "offscreen", "storage"],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  }
+}
