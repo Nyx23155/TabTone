@@ -12,14 +12,23 @@ let eqNodes = [];
 const eqFrequencies = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000];
 const analyserData = new Uint8Array(256);
 const waveformPoints = 512;
-let mixerSettings = {
+const defaultMixerSettings = {
   eq: Array(10).fill(0),
   threshold: -12
 };
+let mixerSettings = {
+  ...defaultMixerSettings
+};
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'capture-stream-ready') {
-    startCapture(message.streamId, message.gain, message.compressor, message.tabId, message.mixer)
+    startCapture(
+      message.streamId,
+      message.gain,
+      message.compressor,
+      message.tabId,
+      message.mixer
+    )
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -77,6 +86,26 @@ async function startCapture(streamId, initialGain, compressorOn, tabId, initialM
   audioCtx = new AudioContext();
   sourceNode = audioCtx.createMediaStreamSource(stream);
 
+  createAudioNodes();
+
+  gainNode.gain.value = initialGain;
+  compressorEnabled = compressorOn;
+  mixerSettings = normalizeMixerSettings({ ...mixerSettings, ...initialMixerSettings });
+  capturedTabId = tabId;
+
+  eqNodes = createEqualizerNodes();
+
+  stream.getTracks().forEach((track) => {
+    track.addEventListener('ended', () => {
+      resetCaptureState();
+    }, { once: true });
+  });
+
+  rebuildChain();
+  applyMixerSettings();
+}
+
+function createAudioNodes() {
   compressorNode = audioCtx.createDynamicsCompressor();
   compressorNode.threshold.value = -12;
   compressorNode.knee.value = 20;
@@ -96,28 +125,16 @@ async function startCapture(streamId, initialGain, compressorOn, tabId, initialM
   analyserNode = audioCtx.createAnalyser();
   analyserNode.fftSize = 256;
   analyserNode.smoothingTimeConstant = 0.35;
+}
 
-  gainNode.gain.value = initialGain;
-  compressorEnabled = compressorOn;
-  mixerSettings = normalizeMixerSettings({ ...mixerSettings, ...initialMixerSettings });
-  capturedTabId = tabId;
-
-  eqNodes = eqFrequencies.map((frequency) => {
+function createEqualizerNodes() {
+  return eqFrequencies.map((frequency) => {
     const node = audioCtx.createBiquadFilter();
     node.type = 'peaking';
     node.frequency.value = frequency;
     node.Q.value = 1.1;
     return node;
   });
-
-  stream.getTracks().forEach((track) => {
-    track.addEventListener('ended', () => {
-      resetCaptureState();
-    }, { once: true });
-  });
-
-  rebuildChain();
-  applyMixerSettings();
 }
 
 function stopCapture() {
@@ -175,13 +192,29 @@ function rebuildChain() {
 }
 
 function normalizeMixerSettings(settings) {
-  const legacyEq = [settings.bass, settings.bass, settings.bass, settings.mid, settings.mid, settings.mid, settings.treble, settings.treble, settings.treble, settings.treble];
+  const legacyEq = [
+    settings.bass,
+    settings.bass,
+    settings.bass,
+    settings.mid,
+    settings.mid,
+    settings.mid,
+    settings.treble,
+    settings.treble,
+    settings.treble,
+    settings.treble
+  ];
+
   return {
     eq: Array.isArray(settings.eq) && settings.eq.length === 10
       ? settings.eq.map((value) => Number(value) || 0)
       : legacyEq.map((value) => Number(value) || 0),
-    threshold: Number(settings.threshold) || -12,
-    balance: Number(settings.balance) || 0,
+    threshold: Number.isFinite(Number(settings.threshold))
+      ? Number(settings.threshold)
+      : -12,
+    balance: Number.isFinite(Number(settings.balance))
+      ? Number(settings.balance)
+      : 0,
     limiter: settings.limiter !== false
   };
 }
