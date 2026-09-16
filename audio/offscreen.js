@@ -10,6 +10,8 @@ let capturedTabId = null;
 let captureStream = null;
 let eqNodes = [];
 const eqFrequencies = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000];
+const analyserData = new Uint8Array(256);
+const waveformPoints = 512;
 let mixerSettings = {
   eq: Array(10).fill(0),
   threshold: -12
@@ -93,7 +95,7 @@ async function startCapture(streamId, initialGain, compressorOn, tabId, initialM
   balanceNode = audioCtx.createStereoPanner();
   analyserNode = audioCtx.createAnalyser();
   analyserNode.fftSize = 256;
-  analyserNode.smoothingTimeConstant = 0.82;
+  analyserNode.smoothingTimeConstant = 0.35;
 
   gainNode.gain.value = initialGain;
   compressorEnabled = compressorOn;
@@ -115,6 +117,7 @@ async function startCapture(streamId, initialGain, compressorOn, tabId, initialM
   });
 
   rebuildChain();
+  applyMixerSettings();
 }
 
 function stopCapture() {
@@ -198,16 +201,18 @@ function applyMixerSettings() {
 function getAudioLevel() {
   if (!analyserNode) return 0;
 
-  const data = new Uint8Array(analyserNode.frequencyBinCount);
-  analyserNode.getByteTimeDomainData(data);
-  const peak = data.reduce((highest, value) => Math.max(highest, Math.abs(value - 128)), 0);
+  analyserNode.getByteTimeDomainData(analyserData);
+  let peak = 0;
+  for (const value of analyserData) {
+    peak = Math.max(peak, Math.abs(value - 128));
+  }
   return Math.min(1, peak / 128);
 }
 
 function getWaveform() {
   if (!analyserNode) return [];
 
-  const data = new Uint8Array(analyserNode.fftSize);
-  analyserNode.getByteTimeDomainData(data);
-  return Array.from(data);
+  analyserNode.getByteTimeDomainData(analyserData);
+  const step = analyserData.length / waveformPoints;
+  return Array.from({ length: waveformPoints }, (_, index) => analyserData[Math.floor(index * step)]);
 }

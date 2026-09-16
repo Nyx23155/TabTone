@@ -95,12 +95,27 @@ function updateMeter(level) { levelValue.textContent = `${Math.round(Math.min(1,
 function refreshMeter() { if (!capturing) { updateMeter(0); drawWaveform([]); return; } chrome.runtime.sendMessage({ type: 'get-waveform' }, (response) => { if (chrome.runtime.lastError) return; const samples = response?.waveform || []; const peak = samples.reduce((highest, value) => Math.max(highest, Math.abs(value - 128)), 0) / 128; updateMeter(peak); drawWaveform(samples); }); }
 
 function drawWaveform(samples) {
-  const width = waveform.width; const height = waveform.height; const center = height / 2; const target = samples.length ? samples : Array(64).fill(128);
-  const next = target.map((value, index) => (displayedWaveform[index] ?? 128) + (value - (displayedWaveform[index] ?? 128)) * 0.22); displayedWaveform = next;
+  const width = waveform.width; const height = waveform.height; const center = height / 2; const pointCount = 96;
+  const target = Array.from({ length: pointCount }, (_, index) => {
+    if (!samples.length) return 0;
+    const start = Math.floor(index * samples.length / pointCount);
+    const end = Math.max(start + 1, Math.floor((index + 1) * samples.length / pointCount));
+    let peak = 0;
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) peak = Math.max(peak, Math.abs(samples[sampleIndex] - 128));
+    return peak / 128;
+  });
+  const next = target.map((value, index) => (displayedWaveform[index] ?? 0) + (value - (displayedWaveform[index] ?? 0)) * 0.42); displayedWaveform = next;
+  const amplitude = next.map((value, index) => {
+    const previous = next[index - 1] ?? value; const following = next[index + 1] ?? value;
+    return (previous + value * 2 + following) / 4;
+  });
+  const points = amplitude.map((value, index) => ({ x: (index / (pointCount - 1)) * width, y: Math.max(2, value * height * 0.84) }));
+
   waveformContext.clearRect(0, 0, width, height); waveformContext.strokeStyle = 'rgba(212, 175, 104, 0.14)'; waveformContext.lineWidth = 1; waveformContext.beginPath(); waveformContext.moveTo(0, center); waveformContext.lineTo(width, center); waveformContext.stroke();
-  const gradient = waveformContext.createLinearGradient(0, 0, width, 0); gradient.addColorStop(0, '#9d8150'); gradient.addColorStop(0.5, '#f0c875'); gradient.addColorStop(1, '#9d8150'); waveformContext.strokeStyle = gradient; waveformContext.shadowColor = 'rgba(240, 200, 117, 0.45)'; waveformContext.shadowBlur = 9; waveformContext.lineWidth = 2; waveformContext.beginPath();
-  next.forEach((value, index) => { const x = (index / Math.max(1, next.length - 1)) * width; const y = center + (value - 128) * 0.38; if (index === 0) { waveformContext.moveTo(x, y); return; } const previousX = ((index - 1) / Math.max(1, next.length - 1)) * width; const previousY = center + (next[index - 1] - 128) * 0.38; waveformContext.quadraticCurveTo(previousX, previousY, (previousX + x) / 2, (previousY + y) / 2); });
-  waveformContext.stroke(); waveformContext.shadowBlur = 0;
+  const gradient = waveformContext.createLinearGradient(0, 0, width, 0); gradient.addColorStop(0, '#9d8150'); gradient.addColorStop(0.5, '#f0c875'); gradient.addColorStop(1, '#9d8150');
+  waveformContext.beginPath(); points.forEach((point, index) => { const y = center - point.y / 2; if (index === 0) waveformContext.moveTo(point.x, y); else { const previous = points[index - 1]; waveformContext.quadraticCurveTo(previous.x, center - previous.y / 2, (previous.x + point.x) / 2, (center - previous.y / 2 + y) / 2); } });
+  for (let index = points.length - 1; index >= 0; index -= 1) { const point = points[index]; const y = center + point.y / 2; const previous = points[index + 1]; if (index === points.length - 1) waveformContext.lineTo(point.x, y); else waveformContext.quadraticCurveTo(previous.x, center + previous.y / 2, (previous.x + point.x) / 2, (center + previous.y / 2 + y) / 2); }
+  waveformContext.closePath(); waveformContext.fillStyle = 'rgba(212, 175, 104, 0.16)'; waveformContext.fill(); waveformContext.strokeStyle = gradient; waveformContext.shadowColor = 'rgba(240, 200, 117, 0.5)'; waveformContext.shadowBlur = 9; waveformContext.lineWidth = 2; waveformContext.stroke(); waveformContext.shadowBlur = 0;
 }
 
 function updateProfilesUi() { const names = Object.keys(profiles).filter((name) => name !== 'default'); profileSelect.innerHTML = `<option value="default">${text('defaultProfile')}</option>`; names.forEach((name) => profileSelect.add(new Option(name, name))); currentProfile.textContent = `${language === 'en' ? 'Profile' : 'Профиль'}: ${profiles[currentHostname] ? currentHostname : text('default')}`; }
@@ -126,6 +141,6 @@ upgradeBtn.addEventListener('click', (event) => { event.preventDefault(); status
 languageSelect.addEventListener('change', async () => { language = languageSelect.value; await chrome.storage.local.set({ language }); applyTranslations(); });
 document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => showScreen(tab.dataset.screen)));
 
-function animateWaveform() { refreshMeter(); requestAnimationFrame(animateWaveform); }
-animateWaveform();
+drawWaveform([]);
+setInterval(() => { if (capturing) refreshMeter(); }, 1000 / 30);
 initializePopup();
