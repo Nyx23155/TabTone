@@ -11,7 +11,8 @@ let captureStream = null;
 let eqNodes = [];
 const eqFrequencies = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000];
 const analyserData = new Uint8Array(256);
-const waveformPoints = 512;
+const frequencyData = new Uint8Array(256);
+const waveformPoints = 64;
 const defaultMixerSettings = {
   eq: Array(10).fill(0),
   threshold: -12
@@ -245,7 +246,17 @@ function getAudioLevel() {
 function getWaveform() {
   if (!analyserNode) return [];
 
-  analyserNode.getByteTimeDomainData(analyserData);
-  const step = analyserData.length / waveformPoints;
-  return Array.from({ length: waveformPoints }, (_, index) => analyserData[Math.floor(index * step)]);
+  analyserNode.getByteFrequencyData(frequencyData);
+  const step = frequencyData.length / waveformPoints;
+  return Array.from({ length: waveformPoints }, (_, index) => {
+    const start = Math.floor(index * step);
+    const end = Math.min(frequencyData.length, Math.ceil((index + 1) * step));
+    let peak = 0;
+
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+      peak = Math.max(peak, frequencyData[sampleIndex]);
+    }
+
+    return peak;
+  });
 }

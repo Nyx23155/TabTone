@@ -203,13 +203,51 @@ async function updateCaptureStatus() {
 }
 
 function updateMeter(level) {
-  levelValue.textContent = `${Math.round(Math.min(1, level) * 100)}%`;
+  const clamped = Math.min(1, Math.max(0, Number(level) || 0));
+  const safeLevel = clamped < 0.03 ? 0 : clamped;
+  levelValue.textContent = `${Math.round(safeLevel * 100)}%`;
+}
+
+function buildSpectrumTarget(samples) {
+  const points = 64;
+  if (!samples || !samples.length) return Array(points).fill(0);
+
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i];
+  const avg = sum / samples.length;
+  const isTimeDomain = avg > 100 && avg < 155;
+
+  const usefulSamplesLength = Math.floor(samples.length * 0.75);
+
+  return Array.from({ length: points }, (_, index) => {
+    const norm = index / (points - 1);
+    const startRatio = Math.pow(index / points, 1.8);
+    const endRatio = Math.pow((index + 1) / points, 1.8);
+
+    const start = Math.floor(startRatio * usefulSamplesLength);
+    const end = Math.max(start + 1, Math.min(usefulSamplesLength, Math.ceil(endRatio * usefulSamplesLength)));
+
+    let peak = 0;
+    for (let i = start; i < end; i++) {
+      let val = samples[i];
+      if (isTimeDomain) {
+        val = Math.abs(val - 128) * 2;
+      }
+      peak = Math.max(peak, val / 255);
+    }
+
+    let edgeFade = 1;
+    if (norm < 0.08) edgeFade = norm / 0.08;
+    else if (norm > 0.92) edgeFade = (1 - norm) / 0.08;
+
+    const finalVal = peak * edgeFade;
+    return finalVal < 0.03 ? 0 : finalVal;
+  });
 }
 
 function refreshMeter() {
   if (!capturing) {
     updateMeter(0);
-    drawWaveform([]);
     return;
   }
 
@@ -217,58 +255,115 @@ function refreshMeter() {
     if (chrome.runtime.lastError) return;
 
     const samples = response?.waveform || [];
-    const peak = samples.reduce(
-      (highest, value) => Math.max(highest, Math.abs(value - 128)),
-      0
-    ) / 128;
+    const peak = samples.reduce((highest, value) => {
+      const normalized = Math.abs(value - 128) * 2 / 255;
+      return Math.max(highest, normalized);
+    }, 0);
+    const safePeak = peak < 0.03 ? 0 : peak;
 
-    updateMeter(peak);
-    drawWaveform(samples);
+    updateMeter(safePeak);
+    const target = buildSpectrumTarget(samples);
+    displayedWaveform = displayedWaveform.map((value, index) => value + (target[index] - value) * 0.15);
+    drawWaveform(displayedWaveform);
   });
 }
 
 function drawWaveform(samples) {
-  const width = waveform.width; const height = waveform.height; const center = height / 2; const pointCount = 96;
-  const target = Array.from({ length: pointCount }, (_, index) => {
-    if (!samples.length) return 0;
-    const start = Math.floor(index * samples.length / pointCount);
-    const end = Math.max(start + 1, Math.floor((index + 1) * samples.length / pointCount));
-    let peak = 0;
-    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) peak = Math.max(peak, Math.abs(samples[sampleIndex] - 128));
-    return peak / 128;
-  });
-  const next = target.map((value, index) => {
-    const previous = displayedWaveform[index] ?? 0;
-    return previous + (value - previous) * 0.42;
-  });
-  displayedWaveform = next;
+  const width = waveform.width;
+  const height = waveform.height;
+  const startY = height - 6;
+  const pointsCount = samples.length;
 
-  const amplitude = next.map((value, index) => {
-    const previous = next[index - 1] ?? value;
-    const following = next[index + 1] ?? value;
-    return (previous + value * 2 + following) / 4;
+  const points = Array.from({ length: pointsCount }, (_, index) => {
+    const value = samples[index] ?? 0;
+    const x = 6 + (index / (pointsCount - 1)) * (width - 12);
+    const y = startY - value * (height - 14);
+    return { x, y };
   });
-  const points = amplitude.map((value, index) => ({
-    x: (index / (pointCount - 1)) * width,
-    y: Math.max(2, value * height * 0.84)
-  }));
 
   waveformContext.clearRect(0, 0, width, height);
-  waveformContext.strokeStyle = 'rgba(212, 175, 104, 0.14)';
+  waveformContext.fillStyle = '#111112';
+  waveformContext.fillRect(0, 0, width, height);
+
+  waveformContext.strokeStyle = 'rgba(245, 195, 102, 0.15)';
   waveformContext.lineWidth = 1;
+  waveformContext.strokeRect(0.5, 0.5, width - 1, height - 1);
+
+  const gradient = waveformContext.createLinearGradient(0, 0, 0, startY);
+  gradient.addColorStop(0, 'rgba(245, 195, 102, 0.45)');
+  gradient.addColorStop(0.5, 'rgba(212, 148, 44, 0.15)');
+  gradient.addColorStop(1, 'rgba(17, 17, 18, 0)');
+
   waveformContext.beginPath();
-  waveformContext.moveTo(0, center);
-  waveformContext.lineTo(width, center);
+  waveformContext.moveTo(points[0].x, startY);
+  waveformContext.lineTo(points[0].x, points[0].y);
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const current = points[i];
+    const next = points[i + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    waveformContext.quadraticCurveTo(current.x, current.y, midX, midY);
+  }
+
+  const last = points[points.length - 1];
+  waveformContext.lineTo(last.x, last.y);
+  waveformContext.lineTo(last.x, startY);
+  waveformContext.closePath();
+  waveformContext.fillStyle = gradient;
+  waveformContext.fill();
+
+  waveformContext.beginPath();
+  waveformContext.moveTo(points[0].x, points[0].y);
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const current = points[i];
+    const next = points[i + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    waveformContext.quadraticCurveTo(current.x, current.y, midX, midY);
+  }
+
+  waveformContext.lineTo(last.x, last.y);
+
+  waveformContext.strokeStyle = '#f5c366';
+  waveformContext.lineWidth = 1.8;
+  waveformContext.shadowColor = '#e8a93e';
+  waveformContext.shadowBlur = 6;
   waveformContext.stroke();
+  waveformContext.shadowBlur = 0;
+}
 
-  const gradient = waveformContext.createLinearGradient(0, 0, width, 0);
-  gradient.addColorStop(0, '#9d8150');
-  gradient.addColorStop(0.5, '#f0c875');
-  gradient.addColorStop(1, '#9d8150');
+function animateSpectrum() {
+  if (!capturing) {
+    const idleTarget = Array(64).fill(0);
+    displayedWaveform = displayedWaveform.map((value, index) => value + (idleTarget[index] - value) * 0.12);
+    drawWaveform(displayedWaveform);
+    updateMeter(0);
+    requestAnimationFrame(animateSpectrum);
+    return;
+  }
 
-  waveformContext.beginPath(); points.forEach((point, index) => { const y = center - point.y / 2; if (index === 0) waveformContext.moveTo(point.x, y); else { const previous = points[index - 1]; waveformContext.quadraticCurveTo(previous.x, center - previous.y / 2, (previous.x + point.x) / 2, (center - previous.y / 2 + y) / 2); } });
-  for (let index = points.length - 1; index >= 0; index -= 1) { const point = points[index]; const y = center + point.y / 2; const previous = points[index + 1]; if (index === points.length - 1) waveformContext.lineTo(point.x, y); else waveformContext.quadraticCurveTo(previous.x, center + previous.y / 2, (previous.x + point.x) / 2, (center + previous.y / 2 + y) / 2); }
-  waveformContext.closePath(); waveformContext.fillStyle = 'rgba(212, 175, 104, 0.16)'; waveformContext.fill(); waveformContext.strokeStyle = gradient; waveformContext.shadowColor = 'rgba(240, 200, 117, 0.5)'; waveformContext.shadowBlur = 9; waveformContext.lineWidth = 2; waveformContext.stroke(); waveformContext.shadowBlur = 0;
+  chrome.runtime.sendMessage({ type: 'get-waveform' }, (response) => {
+    if (!chrome.runtime.lastError) {
+      const samples = response?.waveform || [];
+      const target = buildSpectrumTarget(samples);
+      displayedWaveform = displayedWaveform.map((value, index) => {
+        const targetVal = target[index];
+        const factor = targetVal > value ? 0.35 : 0.12;
+        return value + (targetVal - value) * factor;
+      });
+
+      const peak = samples.reduce((highest, value) => {
+        const normalized = Math.abs(value - 128) * 2 / 255;
+        return Math.max(highest, normalized);
+      }, 0);
+      updateMeter(peak < 0.03 ? 0 : peak);
+      drawWaveform(displayedWaveform);
+    }
+
+    requestAnimationFrame(animateSpectrum);
+  });
 }
 
 function updateProfilesUi() {
@@ -425,6 +520,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => showScreen(tab.dataset.screen));
 });
 
-drawWaveform([]);
-setInterval(() => { if (capturing) refreshMeter(); }, 1000 / 30);
+displayedWaveform = Array(64).fill(0);
+drawWaveform(displayedWaveform);
+requestAnimationFrame(animateSpectrum);
 initializePopup();
