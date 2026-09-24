@@ -47,6 +47,7 @@ let profiles = {};
 let mixerSettings = { eq: [...presets.custom], threshold: -12, balance: 0, limiter: true };
 const waveformContext = waveform.getContext('2d');
 let displayedWaveform = [];
+let eqLevels = new Array(frequencies.length).fill(0);
 const checkoutUrl = '';
 
 function applyTranslations() {
@@ -208,41 +209,75 @@ function updateMeter(level) {
   levelValue.textContent = `${Math.round(safeLevel * 100)}%`;
 }
 
+let ribbonPhase = 0;
+
 function buildSpectrumTarget(samples) {
-  const points = 64;
-  if (!samples || !samples.length) return Array(points).fill(0);
+  if (!samples || !samples.length) return [0, 0, 0];
 
-  let sum = 0;
-  for (let i = 0; i < samples.length; i++) sum += samples[i];
-  const avg = sum / samples.length;
-  const isTimeDomain = avg > 100 && avg < 155;
+  const total = samples.length;
+  const kickEnd = Math.max(2, Math.floor(total * 0.05));
+  let kickPeak = 0;
+  for (let i = 0; i < kickEnd; i++) {
+    if (samples[i] > kickPeak) kickPeak = samples[i];
+  }
+  const kick = Math.pow(kickPeak / 255, 1.8);
 
-  const usefulSamplesLength = Math.floor(samples.length * 0.75);
+  const bassEnd = Math.floor(total * 0.15);
+  let bassSum = 0;
+  for (let i = kickEnd; i < bassEnd; i++) bassSum += samples[i];
+  const bassRumble = bassSum / ((bassEnd - kickEnd) * 255);
 
-  return Array.from({ length: points }, (_, index) => {
-    const norm = index / (points - 1);
-    const startRatio = Math.pow(index / points, 1.8);
-    const endRatio = Math.pow((index + 1) / points, 1.8);
+  const snareEnd = Math.floor(total * 0.45);
+  let snarePeak = 0;
+  for (let i = bassEnd; i < snareEnd; i++) {
+    if (samples[i] > snarePeak) snarePeak = samples[i];
+  }
+  const snare = snarePeak / 255;
 
-    const start = Math.floor(startRatio * usefulSamplesLength);
-    const end = Math.max(start + 1, Math.min(usefulSamplesLength, Math.ceil(endRatio * usefulSamplesLength)));
+  return [kick, snare, bassRumble];
+}
 
+function updateEqMeters(samples) {
+  const bandRatios = [0.02, 0.05, 0.09, 0.15, 0.24, 0.35, 0.48, 0.62, 0.78, 0.92];
+
+  if (!samples || !samples.length) {
+    eqLevels = eqLevels.map((level) => level * 0.82);
+    eqLevels.forEach((level, index) => renderEqLevel(index, level));
+    return;
+  }
+
+  const sampleCount = samples.length;
+
+  frequencies.forEach((_, index) => {
+    const centerIndex = Math.floor(bandRatios[index] * sampleCount);
+    const start = Math.max(0, centerIndex - 2);
+    const end = Math.min(sampleCount, centerIndex + 3);
     let peak = 0;
-    for (let i = start; i < end; i++) {
-      let val = samples[i];
-      if (isTimeDomain) {
-        val = Math.abs(val - 128) * 2;
-      }
-      peak = Math.max(peak, val / 255);
+
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+      peak = Math.max(peak, Number(samples[sampleIndex]) || 0);
     }
 
-    let edgeFade = 1;
-    if (norm < 0.08) edgeFade = norm / 0.08;
-    else if (norm > 0.92) edgeFade = (1 - norm) / 0.08;
-
-    const finalVal = peak * edgeFade;
-    return finalVal < 0.03 ? 0 : finalVal;
+    const target = peak / 255;
+    const response = target > eqLevels[index] ? 0.7 : 0.15;
+    eqLevels[index] += (target - eqLevels[index]) * response;
+    renderEqLevel(index, eqLevels[index]);
   });
+}
+
+function renderEqLevel(index, level) {
+  const input = document.getElementById(`eq-${index}`);
+  if (!input) return;
+
+  const percent = Math.min(100, Math.round(level * 100));
+  if (percent <= 2) {
+    input.style.background = '#1c1a17';
+    input.style.boxShadow = 'none';
+    return;
+  }
+
+  input.style.background = `linear-gradient(to right, #e5a93b 0%, #f5c366 ${percent}%, #1c1a17 ${percent}%, #1c1a17 100%)`;
+  input.style.boxShadow = `0 0 6px rgba(245, 195, 102, ${(percent / 100) * 0.5})`;
 }
 
 function refreshMeter() {
@@ -268,18 +303,23 @@ function refreshMeter() {
   });
 }
 
+function createIdleWaveform() {
+  return [0, 0, 0];
+}
+
 function drawWaveform(samples) {
   const width = waveform.width;
   const height = waveform.height;
-  const startY = height - 6;
-  const pointsCount = samples.length;
+  const centerY = height / 2;
+  const kick = samples[0] ?? 0;
+  const snare = samples[1] ?? 0;
+  const rumble = samples[2] ?? 0;
+  const kickResponse = kick * 2;
+  const snareResponse = snare * 2;
+  const activeAmp = 0.04 + kickResponse * 0.88 + rumble * 0.25;
+  const maxPixelAmp = (height * 0.44) * Math.min(1.0, activeAmp);
 
-  const points = Array.from({ length: pointsCount }, (_, index) => {
-    const value = samples[index] ?? 0;
-    const x = 6 + (index / (pointsCount - 1)) * (width - 12);
-    const y = startY - value * (height - 14);
-    return { x, y };
-  });
+  ribbonPhase += (0.04 + kickResponse * 0.09 + snareResponse * 0.06) * 0.75;
 
   waveformContext.clearRect(0, 0, width, height);
   waveformContext.fillStyle = '#111112';
@@ -289,56 +329,56 @@ function drawWaveform(samples) {
   waveformContext.lineWidth = 1;
   waveformContext.strokeRect(0.5, 0.5, width - 1, height - 1);
 
-  const gradient = waveformContext.createLinearGradient(0, 0, 0, startY);
-  gradient.addColorStop(0, 'rgba(245, 195, 102, 0.45)');
-  gradient.addColorStop(0.5, 'rgba(212, 148, 44, 0.15)');
-  gradient.addColorStop(1, 'rgba(17, 17, 18, 0)');
+  waveformContext.save();
+  waveformContext.globalCompositeOperation = 'lighter';
 
-  waveformContext.beginPath();
-  waveformContext.moveTo(points[0].x, startY);
-  waveformContext.lineTo(points[0].x, points[0].y);
+  const waveFreq = 4.5 + snareResponse * 5.5;
+  const ribbons = [
+    { phaseShift: 0, ampMult: 1.0, color: '#f5c366', glow: '#e8a93e', width: 2.2, blur: 12 + kickResponse * 14 },
+    { phaseShift: 1.7, ampMult: 0.75, color: 'rgba(238, 175, 75, 0.8)', glow: '#d48e28', width: 1.8, blur: 8 + kickResponse * 8 },
+    { phaseShift: 3.4, ampMult: 0.5, color: 'rgba(255, 220, 140, 0.6)', glow: '#f5c366', width: 1.2, blur: 5 }
+  ];
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const current = points[i];
-    const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    waveformContext.quadraticCurveTo(current.x, current.y, midX, midY);
-  }
+  const steps = 70;
+  const edgeFlatMargin = 14;
 
-  const last = points[points.length - 1];
-  waveformContext.lineTo(last.x, last.y);
-  waveformContext.lineTo(last.x, startY);
-  waveformContext.closePath();
-  waveformContext.fillStyle = gradient;
-  waveformContext.fill();
+  ribbons.forEach((ribbon) => {
+    waveformContext.beginPath();
+    waveformContext.strokeStyle = ribbon.color;
+    waveformContext.lineWidth = ribbon.width + kickResponse * 0.8;
+    waveformContext.shadowColor = ribbon.glow;
+    waveformContext.shadowBlur = ribbon.blur;
 
-  waveformContext.beginPath();
-  waveformContext.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = t * width;
+      let envelope = Math.pow(Math.sin(t * Math.PI), 2.0);
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const current = points[i];
-    const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    waveformContext.quadraticCurveTo(current.x, current.y, midX, midY);
-  }
+      if (x < edgeFlatMargin || x > width - edgeFlatMargin) envelope = 0;
 
-  waveformContext.lineTo(last.x, last.y);
+      const wave1 = Math.sin(t * waveFreq + ribbonPhase + ribbon.phaseShift);
+      const wave2 = Math.cos(t * (waveFreq * 0.6) - ribbonPhase * 0.85);
+      const bassJitter = Math.sin(t * 32.0 + ribbonPhase * 3.0) * (rumble * 0.22);
+      const totalWave = wave1 * 0.65 + wave2 * 0.35 + bassJitter;
+      const waveY = totalWave * maxPixelAmp * ribbon.ampMult * envelope;
+      const y = centerY + waveY;
 
-  waveformContext.strokeStyle = '#f5c366';
-  waveformContext.lineWidth = 1.8;
-  waveformContext.shadowColor = '#e8a93e';
-  waveformContext.shadowBlur = 6;
-  waveformContext.stroke();
-  waveformContext.shadowBlur = 0;
+      if (i === 0) waveformContext.moveTo(x, y);
+      else waveformContext.lineTo(x, y);
+    }
+
+    waveformContext.stroke();
+  });
+
+  waveformContext.restore();
 }
 
 function animateSpectrum() {
   if (!capturing) {
-    const idleTarget = Array(64).fill(0);
+    const idleTarget = createIdleWaveform();
     displayedWaveform = displayedWaveform.map((value, index) => value + (idleTarget[index] - value) * 0.12);
     drawWaveform(displayedWaveform);
+    updateEqMeters([]);
     updateMeter(0);
     requestAnimationFrame(animateSpectrum);
     return;
@@ -347,12 +387,14 @@ function animateSpectrum() {
   chrome.runtime.sendMessage({ type: 'get-waveform' }, (response) => {
     if (!chrome.runtime.lastError) {
       const samples = response?.waveform || [];
+      updateEqMeters(samples);
       const target = buildSpectrumTarget(samples);
-      displayedWaveform = displayedWaveform.map((value, index) => {
-        const targetVal = target[index];
-        const factor = targetVal > value ? 0.35 : 0.12;
-        return value + (targetVal - value) * factor;
-      });
+      displayedWaveform[0] += (target[0] - displayedWaveform[0])
+        * (target[0] > displayedWaveform[0] ? 0.65 : 0.14);
+      displayedWaveform[1] += (target[1] - displayedWaveform[1])
+        * (target[1] > displayedWaveform[1] ? 0.50 : 0.12);
+      displayedWaveform[2] += (target[2] - displayedWaveform[2])
+        * (target[2] > displayedWaveform[2] ? 0.45 : 0.10);
 
       const peak = samples.reduce((highest, value) => {
         const normalized = Math.abs(value - 128) * 2 / 255;
@@ -520,7 +562,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => showScreen(tab.dataset.screen));
 });
 
-displayedWaveform = Array(64).fill(0);
+displayedWaveform = createIdleWaveform();
 drawWaveform(displayedWaveform);
 requestAnimationFrame(animateSpectrum);
 initializePopup();

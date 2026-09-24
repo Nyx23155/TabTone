@@ -18,8 +18,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .quick-row, .setting-row { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
 .quick-row label { min-width: 62px; font-size: 0.86rem; }
 input[type="range"] { flex: 1; min-width: 0; accent-color: var(--gold); }
-input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: #414145; }
-input[type="range"]::-webkit-slider-thumb { appearance: none; width: 17px; height: 17px; margin-top: -6px; border: 0; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px rgba(212, 175, 104, 0.35); }
+.quick-row input[type="range"]::-webkit-slider-runnable-track,
+.setting-row input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: #414145; }
+.quick-row input[type="range"]::-webkit-slider-thumb,
+.setting-row input[type="range"]::-webkit-slider-thumb { appearance: none; width: 17px; height: 17px; margin-top: -6px; border: 0; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px rgba(212, 175, 104, 0.35); }
 .value { width: 46px; text-align: right; color: var(--text); font-size: 0.82rem; }
 .check-row { display: flex; align-items: center; gap: 8px; margin-top: 13px; cursor: pointer; font-size: 0.84rem; }
 .check-row input { position: absolute; opacity: 0; }
@@ -28,15 +30,19 @@ input[type="range"]::-webkit-slider-thumb { appearance: none; width: 17px; heigh
 .level-box { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--soft-line); }
 .level-head, .section-head { display: flex; justify-content: space-between; align-items: center; }
 .level-head { color: var(--muted); font-size: 0.75rem; }
-.waveform { display: block; width: 100%; height: 58px; margin-top: 8px; border: 1px solid rgba(212, 175, 104, 0.22); border-radius: 9px; background: rgba(10, 11, 13, 0.58); }
+.waveform { display: block; width: 100%; height: 90px; margin-top: 10px; border: 1px solid rgba(212, 175, 104, 0.22); border-radius: 12px; background: rgba(10, 11, 13, 0.58); box-shadow: inset 0 0 0 1px rgba(212, 175, 104, 0.06); }
 .section-title { margin: 0; font-size: 1.05rem; font-weight: 400; }
 .badge { padding: 4px 8px; border-radius: 7px; color: #171513; background: linear-gradient(135deg, var(--bright), #ad8744); font-size: 0.7rem; font-weight: 700; }
 .pro-locked { opacity: 0.52; } .pro-locked .upgrade-btn { opacity: 1; }
 select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #151619; font-size: 0.8rem; }
 .mixer-select { margin-top: 11px; }
-.eq-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 7px; margin-top: 15px; }
-.eq-band { display: flex; min-width: 0; height: 145px; flex-direction: column; align-items: center; justify-content: space-between; }
-.eq-band input { width: 125px; height: 18px; transform: rotate(-90deg); margin: 49px -49px; }
+.eq-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 7px; margin-top: 15px; align-items: center; }
+.eq-band { display: flex; min-width: 0; height: 175px; flex-direction: column; align-items: center; gap: 8px; justify-content: space-between; }
+.eq-band input[type="range"] { -webkit-appearance: none; appearance: none; width: 120px; height: 6px; margin: 57px 0; transform: rotate(-90deg); outline: none; border: 1px solid rgba(245, 195, 102, 0.15); border-radius: 4px; cursor: pointer; background: #1c1a17; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8); }
+.eq-band input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: transparent; border: none; }
+.eq-band input[type="range"]::-moz-range-track { height: 6px; background: transparent; border: none; }
+.eq-band input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -4px; border: 1px solid rgba(245, 195, 102, 0.4); border-radius: 50%; background: #f5c366; mix-blend-mode: difference; cursor: pointer; }
+.eq-band input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 1px solid rgba(245, 195, 102, 0.4); border-radius: 50%; background: #f5c366; mix-blend-mode: difference; cursor: pointer; }
 .eq-band label { color: var(--muted); font-size: 0.62rem; } .eq-value { color: var(--text); font-size: 0.64rem; }
 .setting-row { font-size: 0.8rem; } .setting-row label { min-width: 73px; color: var(--muted); }
 .profile-card { margin-top: 13px; padding: 12px; border: 1px solid var(--soft-line); border-radius: 11px; background: rgba(0, 0, 0, 0.12); }
